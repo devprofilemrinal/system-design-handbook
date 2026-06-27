@@ -163,10 +163,10 @@ graph TB
     end
 
     subgraph Storage
-        TweetDB[("Tweet Store\nCassandra\nAll tweets ever")]
-        UserDB[("User Store\nPostgreSQL\nProfiles + follows)"]
-        TimelineCache[("Timeline Cache\nRedis\nPre-built feeds)"]
-        MediaStore[("Media Store\nS3 + CDN\nImages/videos")]
+        TweetDB(("Tweet Store\nCassandra\nAll tweets ever"))
+        UserDB(("User Store\nPostgreSQL\nProfiles + follows)"))
+        TimelineCache(("Timeline Cache\nRedis\nPre-built feeds)"))
+        MediaStore(("Media Store\nS3 + CDN\nImages/videos"))
     end
 
     subgraph Async
