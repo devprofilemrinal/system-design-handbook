@@ -303,7 +303,7 @@ sequenceDiagram
         F->>Bloom: Have we seen this URL?
         Bloom-->>F: Not seen
         F->>Frontier: ADD url with priority score
-        Bloom Mark URL as seen
+        F->>Bloom: Mark URL as seen
     end
 ```
 
