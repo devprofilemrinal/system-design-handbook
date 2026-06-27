@@ -119,7 +119,7 @@ graph TB
 
     subgraph Metadata["Metadata Path"]
         MetadataSvc["Metadata Service"]
-        MetadataDB[("Metadata DB\nPostgreSQL\n(titles, descriptions)"]
+        MetadataDB[("Metadata DB\nPostgreSQL\n(titles, descriptions)")]
         SearchIndex["Search Index\nElasticsearch"]
     end
 

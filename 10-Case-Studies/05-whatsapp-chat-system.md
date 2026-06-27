@@ -133,9 +133,9 @@ graph TB
     end
 
     subgraph Storage
-        MsgDB[("Message Store\nCassandra\n(conversation history)"]
-        UserDB[("User Store\nPostgreSQL\n(profiles, contacts)"]
-        PresenceDB[("Presence Store\nRedis\n(online/offline)"]
+        MsgDB[("Message Store\nCassandra\n(conversation history)")]
+        UserDB[("User Store\nPostgreSQL\n(profiles, contacts)")]
+        PresenceDB[("Presence Store\nRedis\n(online/offline)")]
         PushSvc["Push Notification\nService\n(APNs, FCM)"]
     end
 
