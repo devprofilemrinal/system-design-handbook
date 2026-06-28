@@ -1,281 +1,483 @@
-# Availability
+# 02 — Availability
 
 > **NFR Deep Dive #2** — Engineering Handbook
 > Language-agnostic · 8–10 min read
 
 ---
 
-## 1. Overview
+## 1. What Is Availability?
 
-Availability is the percentage of time a system is operational and able to serve requests correctly. It is the most visible non-functional requirement — when availability drops, every user notices, and the business loses money and trust.
+Availability is the fraction of time a system is operational and able to serve requests. It is the most visible non-functional requirement — when availability fails, users cannot use the product at all.
 
 ```
-              Uptime
-Availability = ─────────────────────
-              Uptime + Downtime
+Availability = Uptime / (Uptime + Downtime)
+
+Example:
+  A system that is down for 8.76 hours in a year:
+  Availability = (8,751.24 / 8,760) = 99.9%
 ```
 
-> **Common confusion — Availability vs Reliability:**
-> - **Availability** = is the system *up right now*? (uptime %)
-> - **Reliability** = does the system produce *correct results consistently* over time?
->
-> A system can be available but unreliable (it responds, but with wrong data), or reliable but unavailable (correct when up, but frequently down).
+Availability is expressed as a percentage — specifically, as "nines."
 
 ---
 
-## 2. The "Nines" — How Availability Is Measured
+## 2. The Nines Framework
 
-Availability is expressed as a percentage, usually as a number of "nines." Each additional nine roughly multiplies cost and engineering effort by ~10×.
+Every additional nine represents a 10× improvement in uptime — and a roughly 10× increase in engineering investment to achieve it.
 
-| Availability | Name | Downtime / Year | Downtime / Month | Downtime / Day |
+| Availability | Annual Downtime | Monthly Downtime | Weekly Downtime | Common Name |
 |---|---|---|---|---|
-| 90% | one nine | 36.5 days | 73 hours | 2.4 hours |
-| 99% | two nines | 3.65 days | 7.3 hours | 14.4 min |
-| 99.9% | three nines | 8.77 hours | 43.8 min | 1.44 min |
-| 99.99% | four nines | 52.6 min | 4.38 min | 8.6 sec |
-| 99.999% | five nines | 5.26 min | 26.3 sec | 864 ms |
-| 99.9999% | six nines | 31.6 sec | 2.6 sec | 86 ms |
+| 90% | 36.5 days | 72 hours | 16.8 hours | One nine |
+| 99% | 3.65 days | 7.2 hours | 1.68 hours | Two nines |
+| 99.9% | 8.76 hours | 43.8 minutes | 10.1 minutes | Three nines |
+| 99.99% | 52.56 minutes | 4.38 minutes | 1.01 minutes | Four nines |
+| 99.999% | 5.26 minutes | 26.3 seconds | 6.05 seconds | Five nines |
+| 99.9999% | 31.5 seconds | 2.63 seconds | < 1 second | Six nines |
 
-**Reference points (typical targets):**
-- Internal tools: 99% – 99.9%
-- Standard SaaS / web apps: 99.9%
-- Cloud infrastructure (e.g. compute SLAs): 99.95% – 99.99%
-- Payment / telecom / critical systems: 99.999%
+**Industry reference points (based on public SLAs):**
+- AWS EC2 SLA: 99.99%
+- Google Cloud Compute: 99.99%
+- Most SaaS products: 99.9% (three nines)
+- Payment processors (Stripe, Visa): target 99.999%
 
-> **Key insight:** "Five nines" sounds only slightly better than "three nines," but it is the difference between **8.7 hours** and **5 minutes** of downtime per year. Always translate nines into real time before committing.
+> **Key insight:** The difference between 99.9% and 99.99% is 48 minutes of downtime per month vs 4 minutes. That difference determines whether a payment outage costs you one customer support call or front-page news coverage.
 
 ---
 
-## 3. SLA, SLO, SLI — The Vocabulary
+## 3. Why Availability Is Hard
 
-These three terms are constantly confused. They form a hierarchy.
+Availability is not just "don't let the server crash." A system is unavailable from a user's perspective whenever it fails to serve a request successfully — for any reason:
 
-| Term | Full Name | What It Is | Example |
+```
+Causes of unavailability:
+  Hardware failure     — disk dies, network card fails, datacenter power outage
+  Software bugs        — memory leak, deadlock, unhandled exception
+  Deployment errors    — bad config pushed to production, failed migration
+  Dependency failure   — database is slow, third-party API is down
+  Traffic overload     — more requests than the system can handle
+  Operational errors   — someone deletes the wrong data, misconfigures a firewall
+  Planned maintenance  — deployments, upgrades, database migrations
+```
+
+Every one of these is a real production failure mode. High availability means designing for all of them simultaneously.
+
+---
+
+## 4. Measuring Availability: SLI, SLO, and SLA
+
+These three terms define how availability is measured, targeted, and contracted. They are used at every major tech company and appear in every SRE conversation.
+
+### SLI — Service Level Indicator
+
+The actual metric you measure. The raw number.
+
+```
+Common availability SLIs:
+  Request success rate = successful_requests / total_requests
+  Uptime percentage    = minutes_available / total_minutes
+  Error rate           = failed_requests / total_requests
+```
+
+An SLI is always a ratio over a time window (usually 30 days rolling).
+
+### SLO — Service Level Objective
+
+The internal target you set for an SLI. The goal engineering commits to.
+
+```
+Examples:
+  "99.9% of requests succeed over any 30-day window"
+  "The service is available 99.99% of the time"
+  "Error rate stays below 0.1%"
+```
+
+SLOs are internal. They are stricter than SLAs to give you a buffer before breaching external commitments.
+
+### SLA — Service Level Agreement
+
+The contractual commitment to customers, with defined consequences for breach.
+
+```
+Example SLA:
+  "If monthly availability falls below 99.9%, customers receive a 10% service credit.
+   If it falls below 99.0%, customers receive a 25% credit."
+```
+
+### The Relationship
+
+```
+SLI (what you measure) → compared against → SLO (your internal target)
+                                                  ↓ (stricter than)
+                                             SLA (what you promise customers)
+
+If SLI breaches SLO → engineering alert, incident response
+If SLI breaches SLA → customer credits, contractual consequences
+```
+
+---
+
+## 5. Error Budgets
+
+The error budget is the single most useful concept for balancing reliability work with feature development. It converts availability into a shared engineering currency.
+
+```
+Error budget = 100% - SLO
+
+If SLO = 99.9%:
+  Error budget = 0.1%
+  = 43.8 minutes of allowable downtime per month
+  = 8.76 hours per year
+
+If SLO = 99.99%:
+  Error budget = 0.01%
+  = 4.38 minutes of allowable downtime per month
+```
+
+### How Error Budgets Change Engineering Decisions
+
+```
+Scenario A — Budget healthy (used < 20% this month):
+  → Ship features aggressively
+  → Deploy frequently
+  → Try riskier experiments
+  → The budget absorbs the risk
+
+Scenario B — Budget nearly exhausted:
+  → Freeze risky releases
+  → Focus engineering on reliability
+  → Do not deploy until next month resets the budget
+  → Identify and fix the root cause of recent incidents
+
+Scenario C — Budget exceeded:
+  → No new feature deployments
+  → All engineering focuses on reliability
+  → Post-mortem required before returning to normal cadence
+```
+
+> **Why this matters:** Error budgets turn reliability from a subjective argument ("we should be more stable") into an objective one ("we've used 87% of our budget in week 1 — we cannot afford another deployment this month"). Both product and engineering agree on the same number.
+
+---
+
+## 6. Availability at the System Level
+
+Individual component availability combines to produce system availability. Understanding this math is critical for designing reliable systems.
+
+### Sequential Dependencies (The Multiplication Rule)
+
+When a request must pass through multiple components in sequence, system availability is the product of each component's availability.
+
+```
+System: Client → Load Balancer → Service → Database
+
+Load Balancer availability: 99.99%
+Service availability:       99.99%
+Database availability:      99.99%
+
+System availability = 0.9999 × 0.9999 × 0.9999
+                    = 0.9997
+                    = 99.97%
+
+Three components each at four nines → system is only at three nines.
+```
+
+**The lesson:** Every component you add to the critical path degrades overall availability. This is why:
+- Non-critical work is moved off the critical path (async queues)
+- Caches sit in front of databases (reduce dependency on slow components)
+- Circuit breakers fail fast rather than waiting (cap the blast radius)
+
+### Parallel Redundancy (Improving Availability)
+
+When multiple instances handle the same work, the system is only unavailable if ALL instances fail simultaneously.
+
+```
+Two load balancer instances, each at 99.9% availability:
+
+P(both fail simultaneously) = (1 - 0.999) × (1 - 0.999)
+                             = 0.001 × 0.001
+                             = 0.000001
+                             = 0.0001%
+
+System availability = 1 - 0.0001% = 99.9999%
+
+Two instances at 99.9% → system at 99.9999% (six nines!)
+```
+
+This is why redundancy is the primary tool for achieving high availability. Run multiple instances. If one fails, the others continue serving.
+
+---
+
+## 7. RPO and RTO — Recovery Objectives
+
+When unavailability does occur, two metrics define acceptable recovery:
+
+| Metric | Full Name | Definition | Question It Answers |
 |---|---|---|---|
-| **SLI** | Service Level *Indicator* | The actual measured metric | "Successful requests / total requests = 99.97%" |
-| **SLO** | Service Level *Objective* | The internal target you aim for | "Availability ≥ 99.95% per month" |
-| **SLA** | Service Level *Agreement* | The contractual promise to customers (with penalties) | "If availability < 99.9%, customer gets a 10% refund" |
+| **RTO** | Recovery Time Objective | Maximum acceptable time to restore service after failure | How long can we be down? |
+| **RPO** | Recovery Point Objective | Maximum acceptable data loss measured in time | How much data can we lose? |
 
 ```
-SLI  →  what you measure
-SLO  →  what you aim for      (stricter than SLA)
-SLA  →  what you promise      (looser, has financial penalty)
+Timeline of a failure:
+
+Last backup     System fails    System restored
+     │               │                │
+     ▼               ▼                ▼
+─────●───────────────●────────────────●────▶ time
+     │←── RPO ──────►│←───── RTO ────►│
+
+RPO: How old can the restored data be?
+     (gap between last backup and the failure)
+
+RTO: How long until the service is back?
+     (gap between failure and recovery)
 ```
 
-> **Practice:** Set your SLO *stricter* than your SLA. If you promise 99.9% (SLA) but target 99.95% internally (SLO), you have a safety buffer before breaching the contract.
+### RPO and RTO by System Type
 
-### Error Budget
+| System | Acceptable RTO | Acceptable RPO | Why |
+|---|---|---|---|
+| Payment processing | < 5 minutes | < 1 minute | Every minute down is direct revenue loss |
+| E-commerce checkout | < 15 minutes | < 5 minutes | Users abandon carts; revenue impact |
+| Social media feed | < 30 minutes | < 1 hour | Inconvenient but not catastrophic |
+| Email system | < 1 hour | < 15 minutes | Delayed, not lost |
+| Internal analytics | < 4 hours | < 24 hours | Business reporting; not user-facing |
+| Archival system | < 24 hours | < 24 hours | Accessed rarely; long recovery acceptable |
 
-An error budget is the inverse of your SLO — the amount of downtime you are *allowed* to spend.
+**RPO drives backup strategy:** If RPO = 1 minute, you need near-continuous replication. If RPO = 24 hours, daily backups may suffice.
 
-```
-Error budget = 100% − SLO
-
-SLO = 99.9%  →  error budget = 0.1% = 43.8 min/month
-
-If the budget is unspent → ship features faster, take more risk.
-If the budget is exhausted → freeze risky changes, focus on stability.
-```
-
-This turns availability into a *shared currency* between product (wants features) and operations (wants stability).
+**RTO drives failover strategy:** If RTO = 5 minutes, you need hot standby (running, ready to switch). If RTO = 4 hours, warm standby (stopped, needs startup) may be acceptable.
 
 ---
 
-## 4. Why Systems Become Unavailable
+## 8. The Four Pillars of High Availability
 
-| Cause | Examples |
-|---|---|
-| **Hardware failure** | Disk crash, server power loss, network card failure |
-| **Software bugs** | Memory leaks, deadlocks, unhandled exceptions crashing the process |
-| **Dependency failure** | A downstream service or database goes down and takes you with it |
-| **Traffic spikes** | Load exceeds capacity; system overwhelmed and unresponsive |
-| **Network issues** | Partitions, DNS failures, routing problems |
-| **Human error** | Bad config push, accidental deletion, faulty deployment |
-| **Datacenter / region outage** | Power, cooling, natural disaster, fiber cut |
+Every high-availability system is built on the same four foundations. Skipping any one of them creates gaps that incidents will find.
 
-> Most large-scale outages are caused by **human error and bad deployments**, not hardware. This is why deployment safety (canary releases, rollback) matters as much as redundant hardware.
+### Pillar 1 — Redundancy
+
+No single point of failure. Every critical component has at least one backup.
+
+```
+Single point of failure (SPOF) examples:
+  One load balancer → the entire system goes down if it fails
+  One database primary → all writes fail if it fails
+  One availability zone → regional failure takes down everything
+
+Redundancy removes SPOFs:
+  Two load balancers → if one fails, the other continues
+  Primary + replica(s) → automatic failover on primary failure
+  Multi-AZ deployment → regional failure only affects part of the system
+```
+
+The minimum for any production system: two instances of every stateless service, primary + replica for databases, multi-AZ deployment.
+
+### Pillar 2 — Health Checks and Automatic Failover
+
+Redundancy only helps if unhealthy instances are automatically removed from traffic. Humans cannot respond fast enough — failover must be automatic.
+
+```
+Health check types:
+  Liveness:   "Is the process alive?" → restart if not
+  Readiness:  "Is the service ready to handle requests?" → remove from rotation if not
+
+Health check flow:
+  Load balancer sends GET /health every 10 seconds
+  If 3 consecutive failures → mark instance as unhealthy → stop sending traffic
+  If instance recovers → mark healthy → resume sending traffic
+
+The RTO of automatic failover: seconds.
+The RTO of manual human intervention: minutes to hours.
+```
+
+### Pillar 3 — Graceful Degradation
+
+When part of the system fails, the rest continues working — possibly with reduced functionality, but not a complete outage.
+
+```
+Examples of graceful degradation:
+  Recommendation service is down:
+    → Show popular items instead (static fallback)
+    → User still completes their purchase
+
+  Search index is slow:
+    → Return cached results from the last successful query
+    → User sees slightly stale results but continues browsing
+
+  Payment provider has elevated errors:
+    → Queue the payment and retry asynchronously
+    → Show user "processing" instead of error page
+```
+
+The goal: the system degrades to a reduced but still useful state, rather than failing completely.
+
+### Pillar 4 — Observability and Fast Detection
+
+You cannot fix what you cannot see. High availability requires detecting failures as quickly as possible — ideally before users notice.
+
+```
+Detection methods (fastest to slowest):
+  Synthetic monitoring:   Simulated user transactions every 60 seconds
+  Metric alerts:          Error rate threshold breach → page on-call
+  Log-based alerts:       Specific error pattern in logs → alert
+  User reports:           Support tickets → human escalation (slow)
+
+Target detection time for 99.99% availability:
+  With 4.38 minutes/month budget, each incident must be detected and
+  resolved within minutes. Relying on user reports means you've
+  already breached your budget before you even know there's a problem.
+```
 
 ---
 
-## 5. How Availability Compounds (Serial vs Parallel)
+## 9. Planned vs Unplanned Downtime
 
-Availability of a system depends on how its components are wired.
+Availability targets apply to both planned and unplanned downtime combined. Many teams focus only on incidents, forgetting that deployments, maintenance, and migrations also consume the budget.
 
-### Components in Series (dependency chain)
+### Zero-Downtime Deployments
 
-If a request must pass through every component, their availabilities **multiply** — overall availability *drops*.
+Every deployment is a potential availability event. Modern deployment strategies eliminate this:
 
+**Rolling deployment:**
 ```
-Request → A (99.9%) → B (99.9%) → C (99.9%) → Response
-
-Total = 0.999 × 0.999 × 0.999 = 0.997 = 99.7%
-
-Three reliable parts in series = a LESS available system.
-```
-
-> **Lesson:** Every dependency you add in the request path lowers availability. Minimize synchronous dependencies.
-
-### Components in Parallel (redundancy)
-
-If any one redundant copy can serve the request, their *failure* probabilities multiply — overall availability *rises*.
-
-```
-        ┌── A (99%) ──┐
-Request ┤              ├→ Response   (need only ONE to work)
-        └── A' (99%) ─┘
-
-Failure = 0.01 × 0.01 = 0.0001
-Total   = 1 − 0.0001 = 99.99%
-
-Two 99% nodes in parallel = a 99.99% system.
+Deploy new version to instances one at a time.
+Traffic continues flowing to healthy instances.
+If the new version is bad, stop rollout before all instances are updated.
+→ Zero downtime, gradual rollout, easy rollback
 ```
 
-> **This is the core principle of high availability: redundancy.** Two cheap, unreliable copies in parallel beat one expensive, reliable single point of failure.
+**Blue-Green deployment:**
+```
+Run two identical environments: Blue (live) and Green (idle).
+Deploy new version to Green.
+Test Green. Switch traffic atomically.
+If problems: switch back to Blue instantly.
+→ Zero downtime, instant rollback capability
+```
+
+**Canary deployment:**
+```
+Route 1% of traffic to the new version.
+Monitor for errors and latency regressions.
+Gradually increase to 5%, 10%, 50%, 100%.
+If problems at any stage: roll back.
+→ Zero downtime, real production validation, minimal blast radius
+```
+
+### Database Migrations
+
+Schema migrations on live databases are one of the most common causes of planned outages. Zero-downtime database migrations use the expand-contract pattern:
+
+```
+Phase 1 (Expand): Add the new column/table alongside the old
+  → Both old and new code can work simultaneously
+  → No outage required
+
+Phase 2 (Migrate): Backfill data into the new structure
+  → Background job, no traffic impact
+
+Phase 3 (Contract): Remove the old column/table once all code uses new
+  → Another background job, no outage required
+```
 
 ---
 
-## 6. Techniques to Achieve High Availability
+## 10. Multi-Region Availability
 
-| Technique | How It Helps | Trade-off |
+For 99.99% and above, single-region deployment is often insufficient. A regional infrastructure failure (network issue, datacenter problem) would exceed the monthly downtime budget in hours.
+
+```
+Single region deployment:
+  Regional failure → complete outage
+  RTO = time to bring up another region (hours)
+  Availability ceiling ≈ 99.9% (limited by regional failure rates)
+
+Multi-region active-active:
+  Traffic distributed across multiple regions
+  Regional failure → traffic routes to remaining regions automatically
+  RTO = seconds (DNS failover or load balancer routing)
+  Availability ceiling ≈ 99.99%+ (multiple independent failure domains)
+```
+
+**The trade-off:** Multi-region introduces data consistency challenges. A write in region A must replicate to region B before region B can read it. This is the CAP theorem in practice — covered in depth in `06-Distributed-Systems/02-cap-theorem.md`.
+
+---
+
+## 11. How Large Companies Apply This
+
+| Company | Approach | Source |
 |---|---|---|
-| **Redundancy** | Multiple instances; if one dies, others serve | Cost; data must stay in sync |
-| **Load balancing** | Routes around failed instances via health checks | Adds a hop; LB itself must be redundant |
-| **Replication** | Copies of data on multiple nodes | Replication lag; consistency complexity |
-| **Failover** | Automatic switch to standby on failure | Failover lag; risk of split-brain |
-| **Multi-AZ / Multi-region** | Survives whole-datacenter outages | High cost; cross-region latency |
-| **Auto-scaling** | Adds capacity before load causes failure | Scaling lag; cost spikes |
-| **Health checks** | Detect and remove unhealthy nodes automatically | Must be tuned (false positives/negatives) |
-| **Graceful degradation** | Serve reduced functionality instead of failing fully | Engineering effort to design fallbacks |
+| **Google** | Originated SRE model with SLIs/SLOs/error budgets; treats reliability as a quantified engineering problem | *Google SRE Book* (public) |
+| **AWS** | 99.99% SLA on most compute services; multi-AZ architecture recommended for all production workloads | AWS documentation (public) |
+| **Netflix** | Chaos Monkey deliberately kills production instances to verify the system degrades gracefully; multi-region active-active | Netflix Tech Blog (public) |
+| **Stripe** | Five nines target for payment APIs; extensive runbooks and automated failover for every failure mode | Stripe engineering blog (public) |
 
-### Eliminating Single Points of Failure (SPOF)
-
-A SPOF is any component whose failure brings down the whole system. The goal of HA design is to have **no SPOF**.
-
-```mermaid
-graph TB
-    subgraph BAD["❌ Has SPOFs"]
-        U1["Users"] --> S1["Single Server"]
-        S1 --> D1[("Single Database")]
-    end
-
-    subgraph GOOD["✅ No SPOF"]
-        U2["Users"] --> LB["Load Balancer<br/>(redundant pair)"]
-        LB --> A1["Server 1"]
-        LB --> A2["Server 2"]
-        LB --> A3["Server 3"]
-        A1 & A2 & A3 --> DBP[("Primary DB")]
-        DBP -.replicates.-> DBR[("Replica DB<br/>auto-failover")]
-    end
-```
-
-Every layer — load balancer, application, database — must have redundancy.
+> **Inferred:** Exact internal SLO values are not public. The architectural approaches above are described in public engineering material.
 
 ---
 
-## 7. Resilience Patterns (Failing Gracefully)
+## 12. Best Practices
 
-Redundancy keeps the system up; resilience patterns keep failures from *cascading*.
-
-| Pattern | Problem It Solves | How It Works |
-|---|---|---|
-| **Circuit Breaker** | A failing dependency drags you down with it | After N failures, stop calling it; return fast; periodically re-test |
-| **Retry + Backoff** | Transient blips cause unnecessary failures | Retry with exponentially increasing delays + jitter |
-| **Timeout** | A slow dependency exhausts all your threads | Cap how long any call may wait |
-| **Bulkhead** | One slow dependency consumes all resources | Isolate resources per dependency (separate pools) |
-| **Graceful degradation** | Total failure when one feature breaks | Disable the broken feature, keep core working (e.g. show cached data) |
-| **Rate limiting / Load shedding** | Overload makes the whole system collapse | Reject excess requests to protect the majority |
-
-> **Circuit breaker analogy:** Like an electrical breaker — it trips to protect the rest of the house from one faulty appliance, rather than letting it burn everything down.
+- **Set SLOs before incidents happen** — not reactively after things break.
+- **Use error budgets** to make reliability vs. feature velocity trade-offs objective and shared.
+- **Eliminate every SPOF** — start with load balancers, databases, and network egress.
+- **Automate health checks and failover** — human response time is too slow for four-nines targets.
+- **Design for graceful degradation** — define the reduced-functionality state for every possible dependency failure.
+- **Test failover regularly** — an untested failover path is not a reliable failover path (Chaos Engineering).
+- **Count planned downtime in your budget** — deployments and maintenance consume the same budget as incidents.
 
 ---
 
-## 8. Availability vs Consistency (the CAP trade-off)
-
-During a network partition, a distributed system must choose between staying available and staying consistent — it cannot have both. (Full treatment in the CAP Theorem document.)
-
-| Choice | Behaviour During Partition | Use When |
-|---|---|---|
-| **Choose Availability (AP)** | Keep responding, possibly with stale data | Social feeds, product catalogs, DNS — being up matters more than perfect freshness |
-| **Choose Consistency (CP)** | Reject requests rather than serve wrong data | Banking, inventory, bookings — wrong data is worse than no answer |
-
-> Higher availability often means accepting **eventual consistency**. This is a deliberate trade, not a free lunch.
-
----
-
-## 9. How Large Companies Apply This
-
-| Company | Application | Source |
-|---|---|---|
-| **Netflix** | Built Chaos Monkey to randomly kill instances in production, forcing engineers to design for failure | Netflix Tech Blog (public) |
-| **Amazon** | Multi-AZ by default; SLAs offer service credits when breached | AWS public SLA docs |
-| **Google** | Pioneered the SRE model: SLOs, error budgets, and the "embrace risk" philosophy | *Google SRE Book* (public) |
-| **Cloud providers** | Region + availability-zone architecture lets customers survive datacenter loss | Public cloud documentation |
-
-> **Inferred:** Specific internal SLO numbers are rarely public; the patterns (chaos engineering, error budgets, multi-AZ) are documented in public engineering material.
-
----
-
-## 10. Best Practices
-
-- **Translate nines into real time** before committing — know what 99.99% actually costs in downtime.
-- **Set SLO stricter than SLA** to keep a safety buffer.
-- **Use error budgets** to balance feature velocity against stability.
-- **Eliminate every SPOF** — redundancy at every layer (LB, app, DB).
-- **Add circuit breakers and timeouts** on every external call to stop cascading failures.
-- **Design for graceful degradation** — partial service beats total outage.
-- **Practice failure** — chaos testing and regular failover drills; an untested failover is not a failover.
-- **Make deployments safe** — canary releases and instant rollback (most outages come from deploys).
-
----
-
-## 11. Common Mistakes
+## 13. Common Mistakes
 
 | Mistake | Consequence | Fix |
 |---|---|---|
-| Promising more nines than needed | 10× cost for availability no one required | Match the target to the business need |
-| Ignoring dependency availability | Your 99.99% app calls a 99% service → you are 99% | Count every dependency in the math; minimize them |
-| No circuit breakers | One slow dependency cascades into total outage | Wrap external calls with breakers + timeouts |
-| Untested failover | Failover fails exactly when you need it most | Run regular failover drills |
-| Redundancy without anti-affinity | Both "redundant" copies on the same physical host | Spread replicas across AZs/racks |
-| Confusing availability with reliability | System is "up" but serving wrong/stale data | Measure correctness, not just uptime |
+| Targeting 100% availability | Impossible; drives over-engineering; no error budget for deployments | Set a realistic target based on business need |
+| Ignoring planned downtime | Deployments consume the budget before incidents happen | Use zero-downtime deployment strategies |
+| SPOF in the critical path | One component failure = complete outage | Audit every component; add redundancy to SPOFs |
+| Manual failover only | Humans too slow; RTO measured in hours not seconds | Automate health checks and failover |
+| Untested failover | Works in theory, fails in practice | Regular DR drills; Chaos Engineering |
+| SLO stricter than the dependencies allow | You cannot have 99.99% if your database vendor SLA is 99.9% | SLO must be consistent with dependency SLAs |
+| No error budget policy | Reliability vs. features argument is subjective | Define what happens when the budget is consumed |
 
 ---
 
-## 12. Interview Questions
+## 14. Interview Questions
 
-1. What is the difference between availability and reliability?
-2. Convert 99.99% availability into downtime per month. *(≈ 4.4 minutes)*
-3. Explain SLA, SLO, and SLI and how they relate.
-4. Three services each at 99.9% sit in series. What is the combined availability? *(≈ 99.7%)*
-5. How does adding redundant parallel nodes improve availability mathematically?
-6. What is an error budget and how does it guide engineering decisions?
-7. Why do most large outages come from deployments rather than hardware?
-8. How does a circuit breaker prevent cascading failures?
+1. What is the difference between an SLI, SLO, and SLA? Give an example of each.
+2. A service has three components in sequence, each at 99.9% availability. What is the system availability?
+3. What is an error budget and how does it change engineering decisions?
+4. What is the difference between RTO and RPO? Give an example where they have very different targets.
+5. What are the four pillars of high availability?
+6. Why does running at high CPU utilisation hurt availability, not just performance?
+7. How would you design a deployment strategy that contributes zero downtime to the availability budget?
 
 ---
 
-## 13. Summary
+## 15. Summary
 
 | Concept | Key Takeaway |
 |---|---|
-| **Availability** | % of time the system is up. Measured in "nines." |
-| **Nines** | Each nine ≈ 10× cost. Always convert to real downtime. |
-| **SLA/SLO/SLI** | Promise / target / measurement. Keep SLO stricter than SLA. |
-| **Error budget** | `100% − SLO`. The currency balancing features vs stability. |
-| **Series** | Dependencies multiply → availability *drops*. Minimize them. |
-| **Parallel** | Redundancy multiplies failure odds → availability *rises*. |
-| **Resilience** | Circuit breakers, timeouts, degradation stop cascades. |
-| **CAP** | Under partition, trade consistency for availability or vice versa. |
+| **Availability** | Fraction of time the system serves requests. Expressed in nines. |
+| **Nines** | Each additional nine = 10× better but ~10× more investment. |
+| **SLI → SLO → SLA** | Measure → internal target → external contract. SLO stricter than SLA. |
+| **Error budget** | 100% - SLO. Shared currency between features and reliability. |
+| **Sequential components** | System availability = product of component availabilities. Always lower. |
+| **Redundancy** | Primary tool for improving availability. Removes single points of failure. |
+| **RTO / RPO** | Recovery Time Objective (how long down). Recovery Point Objective (how much data lost). |
+| **Graceful degradation** | Partial failure → reduced functionality, not complete outage. |
 
 ---
 
-## 14. Cross References
+## 16. Cross References
 
-**Prerequisites:** System Design Fundamentals (FR, HLD, LLD) · Latency & Throughput (NFR #1)
+**Prerequisites:** 01-latency-and-throughput.md · 00-Introduction/02-functional-and-non-functional-requirements.md
 
-**Related Topics:** CAP Theorem · Replication & Consistency · Load Balancing · Disaster Recovery (RTO/RPO)
+**Related Topics:**
+- Resiliency patterns (circuit breaker, bulkhead, retry) → `07-Microservices/03-inter-service-communication.md` and `07-Microservices/04-microservices-patterns.md`
+- Availability vs Consistency trade-off → `06-Distributed-Systems/02-cap-theorem.md`
+- Fault tolerance deep dive → `01-NFR/06-fault-tolerance.md`
+- Incident response → `08-Observability/05-incident-response.md`
 
-**What to Learn Next:** Scalability (NFR Deep Dive #3) · Fault Tolerance & Resilience Patterns
+**What to Learn Next:** 03-scalability.md · 04-reliability.md
 
 ---
 
